@@ -30,6 +30,10 @@ models/*.pkl
 # Logs
 *.log
 server.log
+logs/
+
+# Uploaded data files (WebUI)
+uploads/
 
 # WSL2 / Linux artifacts
 *.so
