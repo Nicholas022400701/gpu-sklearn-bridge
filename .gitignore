@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Shared memory / mmap pool — large binary files, not for version control
+shm/pool.bin
+shm/*.npy
+shm/*.bin
+
+# Trained model weights — can be large, regenerate via training
+models/*.pkl
+
+# Logs
+*.log
+server.log
+
+# WSL2 / Linux artifacts
+*.so
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# VS Code
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
