@@ -3,8 +3,6 @@ Per-model logging system.
 Each model gets its own log file under logs/<model_id>.log
 Logs are also kept in memory for live display in the WebUI.
 """
-import os
-import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
