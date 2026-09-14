@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpu-sklearn-bridge"
+version = "0.1.0"
+description = "import cuml on Windows: a thin scikit-learn-style proxy that forwards to RAPIDS cuML running inside WSL2 (HTTP JSON-RPC + mmap pool)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "Nicholas Ou" }]
+keywords = ["cuml", "rapids", "wsl2", "windows", "gpu", "scikit-learn"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Windows-side runtime imports only: cuml_proxy/proxy.py -> numpy, requests; shm_transport.py -> numpy.
+# The WSL2 server (server.py) additionally needs flask and cuml-cu12; those are not Windows-side deps.
+dependencies = [
+    "numpy",
+    "requests",
+]
+
+[project.urls]
+Homepage = "https://github.com/Nicholas022400701/gpu-sklearn-bridge"
+Repository = "https://github.com/Nicholas022400701/gpu-sklearn-bridge"
+
+[tool.setuptools]
+# `cuml` is the import-alias shim (cuml/__init__.py), `cuml_proxy` is the real package.
+# shm_transport.py is a top-level module loaded by cuml_proxy/proxy.py from the directory above it,
+# so it is shipped as a py-module. NOTE: proxy.py locates it via Path(__file__).parent.parent, which
+# holds for `pip install -e .` (editable) and for a site-packages install where both land in the same dir.
+packages = ["cuml", "cuml_proxy"]
+py-modules = ["shm_transport"]
