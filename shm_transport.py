@@ -20,15 +20,24 @@ from pathlib import Path
 from threading import Lock
 
 # ── 路径（文件存放在 WSL2 Linux FS，双端通过不同挂载点访问）──────────────────
-# 文件在 WSL2 的 /home/nicho/gpu-sklearn-bridge/shm/ 目录
-# WSL2 (Linux) 直接访问：/home/nicho/gpu-sklearn-bridge/shm/pool.bin
-# Windows 通过 UNC 路径访问：\\wsl.localhost\Ubuntu\home\nicho\gpu-sklearn-bridge\shm\pool.bin
+# 文件在 WSL2 的 $HOME/gpu-sklearn-bridge/shm/ 目录
+# WSL2 (Linux) 直接访问：$HOME/gpu-sklearn-bridge/shm/pool.bin
+# Windows 通过 UNC 路径访问：\\wsl.localhost\<DISTRO>\home\<WSL 用户名>\gpu-sklearn-bridge\shm\pool.bin
 #
 # 设计原因：文件存在 Linux FS（非 /mnt/c/ virtio-fs）上，
 #   - WSL2 的读写是本地 page cache，无跨系统 cache 问题
 #   - Windows 通过 P9/VirtioFS 的 UNC 路径访问，fd.read 每次都绕过 Windows cache 获取最新
-_WIN_PATH = r"\\wsl.localhost\Ubuntu\home\nicho\gpu-sklearn-bridge\shm\pool.bin"
-_WSL_PATH = "/home/nicho/gpu-sklearn-bridge/shm/pool.bin"
+#
+# 可用环境变量覆盖（未设置时与原硬编码行为一致）：
+#   SKLEARN_BRIDGE_POOL        pool.bin 完整路径（两端均生效）
+#   SKLEARN_BRIDGE_WSL_DISTRO  WSL2 发行版名，默认 Ubuntu（仅 Windows 端）
+#   SKLEARN_BRIDGE_WSL_USER    WSL2 用户名，默认取 Windows 用户名 %USERNAME%（仅 Windows 端）
+_WSL_DISTRO = os.environ.get("SKLEARN_BRIDGE_WSL_DISTRO", "Ubuntu")
+_WSL_USER = os.environ.get("SKLEARN_BRIDGE_WSL_USER") or os.environ.get("USERNAME", "")
+_WIN_PATH = os.environ.get("SKLEARN_BRIDGE_POOL") or (
+    r"\\wsl.localhost\%s\home\%s\gpu-sklearn-bridge\shm\pool.bin" % (_WSL_DISTRO, _WSL_USER))
+_WSL_PATH = os.environ.get("SKLEARN_BRIDGE_POOL") or os.path.join(
+    os.path.expanduser("~"), "gpu-sklearn-bridge", "shm", "pool.bin")
 
 SLOT_SIZE  = 256 * 1024 * 1024   # 256 MB / slot
 INPUT_SLOT_COUNT = 4    # 输入 slots（冗余以避免阻塞）

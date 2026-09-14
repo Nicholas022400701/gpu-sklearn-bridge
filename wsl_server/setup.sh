@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # WSL2 端安装脚本：安装 uv、创建 GPU Python 环境、安装 cuML + rpyc
+# SKLEARN_BRIDGE_HOME：仓库根目录（Windows 侧克隆的 /mnt/c/... 路径），默认为本脚本所在目录的上一级
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BRIDGE_HOME="${SKLEARN_BRIDGE_HOME:-$(dirname "$SCRIPT_DIR")}"
 VENV_PATH="$HOME/.venv/gpu-sklearn"
 SERVER_DIR="$HOME/gpu-sklearn-bridge"
 LOG_FILE="/tmp/gpu_sklearn_setup.log"
@@ -46,7 +49,7 @@ echo "[4/5] 部署服务端脚本..."
 mkdir -p "$SERVER_DIR"
 
 # 从 Windows 挂载路径复制（或内联写入）
-WINDOWS_SERVER="/mnt/c/Users/nicho/gpu-sklearn-bridge/wsl_server/server.py"
+WINDOWS_SERVER="$BRIDGE_HOME/wsl_server/server.py"
 if [ -f "$WINDOWS_SERVER" ]; then
     cp "$WINDOWS_SERVER" "$SERVER_DIR/server.py"
     echo "✅ 从 Windows 复制 server.py"
