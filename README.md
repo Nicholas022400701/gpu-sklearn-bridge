@@ -1,5 +1,7 @@
 # gpu-sklearn-bridge
 
+中文版: [README.zh-CN.md](README.zh-CN.md)
+
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Windows%2011%20%2B%20WSL2-blue?logo=windows" alt="platform">
   <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" alt="python">
@@ -8,74 +10,166 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
 </p>
 
-> **在 Windows 上透明使用 RAPIDS cuML GPU 加速机器学习**
+> **Use RAPIDS cuML GPU-accelerated machine learning transparently on Windows**
 >
-> NVIDIA 从未发布任何 Windows 版 cuML wheel。本项目通过 WSL2 桥接，让你在 Windows Python 里直接 `import cuml`，所有计算在 GPU 上完成，行为与官方 cuML 完全一致。
+> NVIDIA has never released a Windows cuML wheel. This project bridges Windows Python to WSL2 so that you can `import cuml` directly on Windows; all computation runs on the GPU inside WSL2, with the same API as the official cuML.
+
+> **Provenance note.** Every version number, test count and benchmark figure in this document is copied verbatim from the original Chinese README (test date 2026-02-26). Nothing was re-run for this English revision.
 
 ---
 
-## 目录
+## Contents
 
-- [环境信息](#环境信息)
-- [快速开始](#快速开始)
-- [架构概览](#架构概览)
-- [支持的算法](#支持的算法)
-- [安装与部署](#安装与部署)
-- [模型保存与加载](#模型保存与加载)
-- [开机自启动](#开机自启动)
-- [手动管理服务](#手动管理服务)
-- [文件结构](#文件结构)
-- [性能参考](#性能参考)
-- [已知限制](#已知限制)
-- [导入方式对比](#导入方式对比)
-- [依赖](#依赖)
+- [What it is](#what-it-is)
+- [Why it exists](#why-it-exists)
+- [Tested environment](#tested-environment)
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+- [Supported estimators](#supported-estimators)
+- [Saving and loading models](#saving-and-loading-models)
+- [Auto-start at logon](#auto-start-at-logon)
+- [Managing the service manually](#managing-the-service-manually)
+- [Repository layout](#repository-layout)
+- [Benchmarks](#benchmarks)
+- [Known limits](#known-limits)
+- [Environment variables](#environment-variables)
+- [Dependencies](#dependencies)
 - [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-## 环境信息
+## What it is
 
-| 项目 | 版本 |
+`gpu-sklearn-bridge` is a small client/server bridge:
+
+- **Windows side** – `cuml/` (a shim so that `import cuml` works) and `cuml_proxy/` (a scikit-learn-style proxy package). Every estimator is a `ProxyEstimator` that forwards `fit` / `predict` / `transform` / … to the server over HTTP.
+- **WSL2 side** – `server.py`, a Flask HTTP JSON-RPC server that owns the real cuML models on the GPU.
+- **Transport** – arrays smaller than 10 KB travel inline as Base64 in the JSON body; arrays of 10 KB or more go through a 4 GB pre-allocated mmap pool (`shm/pool.bin`, 16 slots) that lives on the WSL2 Linux filesystem and is reached from Windows through the `\\wsl.localhost\...` UNC path.
+
+## Why it exists
+
+NVIDIA has never released a Windows cuML wheel. Running cuML inside WSL2 and bridging it to Windows Python lets Windows code use `import cuml` and the standard scikit-learn interface while the actual work happens on the GPU.
+
+---
+
+## Tested environment
+
+(copied from the original README)
+
+| Item | Version |
 |---|---|
 | OS | Windows 11 |
 | GPU | NVIDIA RTX 4060 Laptop 8 GB |
 | CUDA Toolkit | 12.8 |
-| 驱动 | 576.80 |
-| WSL2 发行版 | Ubuntu 24.04.2 LTS |
+| Driver | 576.80 |
+| WSL2 distro | Ubuntu 24.04.2 LTS |
 | cuML | 26.02.000 |
-| Python（Windows） | 3.11.13（uv venv） |
-| Python（WSL2） | 3.11.14（uv venv） |
+| Python (Windows) | 3.11.13 (uv venv) |
+| Python (WSL2) | 3.11.14 (uv venv) |
 
 ---
 
-## 快速开始
+## Architecture
 
-### 1. 确认服务已运行
+```
+Windows Python
+  import cuml          <- cuml/ is a local shim that forwards to cuml_proxy
+  import cuml_proxy    <- same thing, explicit form
+       |
+       |  (1) HTTP JSON-RPC  127.0.0.1:19876
+       |  (2) arrays >= 10 KB -> extended mmap pool.bin (4 GB pre-allocated, 16 slots)
+       |      Windows reaches it through the \\wsl.localhost\<DISTRO>\... UNC path
+       v
+WSL2 Ubuntu  server.py  (Flask)
+  ~/gpu-sklearn-bridge/shm/pool.bin  <- pool.bin lives on the WSL2 Linux FS (ext4)
+       |
+       |  import cuml  (the real RAPIDS cuML)
+       v
+RAPIDS cuML 26.02 -> RTX 4060 GPU
+```
+
+### Three-tier transport
+
+| Array size | Transport | Notes |
+|---|---|---|
+| < 10 KB | HTTP inline Base64 | embedded in the JSON body |
+| >= 10 KB | **extended mmap** `pool.bin` | 4 GB pre-allocated pool, 16 slots allocated round-robin; pool.bin lives on the WSL2 Linux FS, Windows reads it through the UNC path `\\wsl.localhost\...` |
+| Model files | pickle `.pkl` | explicit `save()` / `load()` |
+
+### Extended mmap layout (4 GB, 16 slots)
+
+```
+pool.bin
++-------------------------+-------------------------+------------------------------------------+
+|   Input  slots 0-3      |  Output  slots 4-7      |         Scratch slots 8-15               |
+|      1 GB (4x256 MB)    |     1 GB (4x256 MB)     |             2 GB (8x256 MB)              |
+|  Windows writes, WSL2   |  WSL2 writes, Windows   |      server-internal scratch buffers     |
+|  reads                  |  reads                  |                                          |
++-------------------------+-------------------------+------------------------------------------+
+```
+
+Client and server each keep a **round-robin counter** and take the next slot on every request (0 -> 1 -> 2 -> 3 -> 0 ...), so up to 4 requests can be in flight without blocking each other.
+
+---
+
+## Quickstart
+
+> Replace `<DISTRO>` with your WSL2 distro name (default `Ubuntu`). All paths below are relative to your own home directory; nothing in the repository depends on a specific user name any more (see [Environment variables](#environment-variables)).
+
+### Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| Windows 10/11 (x64) | must support WSL2 |
+| NVIDIA GPU | driver >= 525, CUDA Toolkit 12.x |
+| WSL2 + Ubuntu | `wsl --install -d Ubuntu` |
+| Python 3.11 | on both the Windows side and the WSL2 side |
+
+### WSL2 side (server)
+
+```bash
+# inside WSL2
+git clone https://github.com/Nicholas022400701/gpu-sklearn-bridge.git ~/gpu-sklearn-bridge
+cd ~/gpu-sklearn-bridge
+pip install flask numpy
+# cuML must already be installed in this environment (see https://docs.rapids.ai/install)
+python -c "import cuml; print(cuml.__version__)"
+```
+
+`start_server.sh` expects the WSL2 clone at `$HOME/gpu-sklearn-bridge` and a Python interpreter at `$HOME/envs/gpu-sklearn/bin/python`. If yours live elsewhere, set `SKLEARN_BRIDGE_HOME` and `SKLEARN_BRIDGE_PYTHON` before running it, or simply run `python server.py` in that environment.
+
+### Windows side (client)
 
 ```powershell
+# PowerShell
+git clone https://github.com/Nicholas022400701/gpu-sklearn-bridge.git "$env:USERPROFILE\gpu-sklearn-bridge"
+uv venv "$env:USERPROFILE\envs\cuml-proxy"
+& "$env:USERPROFILE\envs\cuml-proxy\Scripts\Activate.ps1"
+
+# option A: editable install (pyproject.toml)
+pip install -e "$env:USERPROFILE\gpu-sklearn-bridge"
+
+# option B: add the repository to sys.path with a .pth file
+pip install numpy requests
+$site = python -c "import site; print(site.getsitepackages()[0])"
+"$env:USERPROFILE\gpu-sklearn-bridge" | Out-File "$site\cuml_proxy_bridge.pth" -Encoding ascii
+```
+
+### Start the bridge and check it
+
+```powershell
+& "$env:USERPROFILE\gpu-sklearn-bridge\start_bridge.bat"
+# wait about 8 seconds, then:
 Invoke-RestMethod "http://127.0.0.1:19876/health"
 # cuml_version  status
 # 26.02.000     ok
 ```
 
-若连接失败，手动启动：
-
-```powershell
-C:\Users\nicho\gpu-sklearn-bridge\start_bridge.bat
-# 等待约 8 秒后重试
-```
-
-### 2. 激活 Windows 环境
-
-```powershell
-C:\Users\nicho\envs\cuml-proxy\Scripts\Activate.ps1
-```
-
-### 3. 直接 `import cuml` 使用（推荐）
+### Use it
 
 ```python
-import cuml                              # ← 与官方 cuML 写法完全相同
+import cuml                              # <- identical to the official cuML spelling
 from cuml.svm import SVC
 from cuml.preprocessing import StandardScaler
 from cuml.decomposition import PCA
@@ -91,58 +185,18 @@ X_s = sc.fit_transform(X)
 
 svm = SVC(kernel="rbf", C=1.0)
 svm.fit(X_s, y)
-print(svm.predict(X_s[:5]))             # GPU 推理
+print(svm.predict(X_s[:5]))             # GPU inference
 
 print(cuml.__version__)                  # 26.02.000
 ```
 
----
-
-## 架构概览
-
-```
-Windows Python
-  import cuml          ← cuml/ 是本地 shim，自动转发到 cuml_proxy
-  import cuml_proxy    ← 效果相同，显式写法
-       │
-       │  ① HTTP JSON-RPC  127.0.0.1:19876
-       │  ② 数组 ≥ 10 KB → 扩展 mmap pool.bin（4 GB 预分配，16 slots）
-       │     Windows 通过 \\wsl.localhost\Ubuntu\... UNC 路径访问
-       ↓
-WSL2 Ubuntu  server.py  (Flask)
-  ~/gpu-sklearn-bridge/shm/pool.bin  ← pool.bin 存储于 WSL2 Linux FS (ext4)
-       │
-       │  import cuml（真正的 RAPIDS cuML）
-       ↓
-RAPIDS cuML 26.02 → RTX 4060 GPU
-```
-
-### 传输层三级策略
-
-| 数组大小 | 传输方式 | 说明 |
-|---|---|---|
-| < 10 KB | HTTP inline Base64 | 直接嵌入 JSON body |
-| ≥ 10 KB | **扩展 mmap** `pool.bin` | 4 GB 预分配池，16 slots 轮转分配；pool.bin 存于 WSL2 Linux FS，Windows 通过 UNC `\\wsl.localhost\...` 访问 |
-| 模型文件 | pickle `.pkl` | 主动调用 `save()` / `load()` 持久化 |
-
-### 扩展 mmap 布局（4 GB，16 slots）
-
-```
-pool.bin
-┌─────────────────────────┬─────────────────────────┬──────────────────────────────────────────┐
-│   Input  slots 0-3      │  Output  slots 4-7       │         Scratch slots 8-15               │
-│      1 GB (4×256 MB)    │     1 GB (4×256 MB)      │             2 GB (8×256 MB)              │
-│   Windows 写 → WSL2 读  │  WSL2 写 → Windows 读   │         服务端内部临时缓冲区              │
-└─────────────────────────┴─────────────────────────┴──────────────────────────────────────────┘
-```
-
-客户端和服务端各自维护**轮转计数器**，每次请求自动分配下一个 slot（0→1→2→3→0…），实现最多 4 个并发不阻塞。
+`cuml` and `cuml_proxy` point to exactly the same objects; `cuml` is an alias layer over `cuml_proxy`. `from sklearn.svm import SVC` still gives you the CPU scikit-learn implementation.
 
 ---
 
-## 支持的算法
+## Supported estimators
 
-| 模块 | 类 |
+| Module | Classes |
 |---|---|
 | `cuml.linear_model` | `LinearRegression` `LogisticRegression` `Ridge` `Lasso` `ElasticNet` |
 | `cuml.svm` | `SVC` `SVR` |
@@ -153,80 +207,11 @@ pool.bin
 | `cuml.preprocessing` | `StandardScaler` `MinMaxScaler` `LabelEncoder` |
 | `cuml.manifold` | `TSNE` `UMAP` |
 
-所有类均实现 scikit-learn 标准接口：`fit` / `predict` / `transform` / `fit_transform` / `fit_predict` / `score` / `get_params` / `set_params`。
+All classes implement the standard scikit-learn interface: `fit` / `predict` / `transform` / `fit_transform` / `fit_predict` / `score` / `get_params` / `set_params`.
 
 ---
 
-## 安装与部署
-
-> 以下路径中的 `<USER>` 请替换为你自己的 Windows 用户名，`<DISTRO>` 替换为你的 WSL2 发行版名（默认 `Ubuntu`）。
-
-### 前提条件
-
-| 要求 | 说明 |
-|---|---|
-| Windows 10/11 (x64) | 需支持 WSL2 |
-| NVIDIA GPU | 驱动 ≥ 525，CUDA Toolkit 12.x |
-| WSL2 + Ubuntu | `wsl --install -d Ubuntu` |
-| Python 3.11 | Windows 端和 WSL2 端均需安装 |
-
-### 1. 克隆仓库
-
-```powershell
-# Windows 端（PowerShell）
-git clone https://github.com/Nicholas022400701/gpu-sklearn-bridge.git C:\Users\<USER>\gpu-sklearn-bridge
-
-# 同步到 WSL2
-wsl -d <DISTRO> -- git clone https://github.com/Nicholas022400701/gpu-sklearn-bridge.git ~/gpu-sklearn-bridge
-```
-
-### 2. 配置 WSL2 服务端
-
-```bash
-cd ~/gpu-sklearn-bridge
-pip install flask numpy
-# 确认 cuML 已安装（参考 https://docs.rapids.ai/install）
-python -c "import cuml; print(cuml.__version__)"
-```
-
-### 3. 配置 Windows 客户端
-
-```powershell
-uv venv C:\Users\<USER>\envs\cuml-proxy
-C:\Users\<USER>\envs\cuml-proxy\Scripts\Activate.ps1
-pip install numpy requests
-
-# 将项目目录加入 sys.path（以 .pth 文件方式）
-$site = python -c "import site; print(site.getsitepackages()[0])"
-"C:\Users\<USER>\gpu-sklearn-bridge" | Out-File "$site\cuml_proxy_bridge.pth" -Encoding ascii
-```
-
-### 4. 设置环境变量（可选，自定义路径）
-
-```powershell
-$Env:SKLEARN_BRIDGE_PORT   = "19876"
-$Env:SKLEARN_BRIDGE_SHARED = "C:\Users\<USER>\gpu-sklearn-bridge\shm"
-$Env:SKLEARN_BRIDGE_MODELS = "C:\Users\<USER>\gpu-sklearn-bridge\models"
-```
-
-### 5. 配置开机自启（可选）
-
-```powershell
-.\scripts\install_windows.ps1
-```
-
-### 6. 验证
-
-```powershell
-.\start_bridge.bat
-Invoke-RestMethod "http://127.0.0.1:19876/health"
-# cuml_version  status
-# 26.02.000     ok
-```
-
----
-
-## 模型保存与加载
+## Saving and loading models
 
 ```python
 from cuml.svm import SVC
@@ -237,133 +222,134 @@ import numpy as np
 X = np.random.rand(200, 10).astype("float32")
 y = (X[:, 0] > 0.5).astype("float32")
 
-# 训练
 sc = StandardScaler()
 X_s = sc.fit_transform(X)
 svm = SVC(kernel="rbf")
 svm.fit(X_s, y)
 
-# 保存权重（pickle 到 models/ 目录）
-sc.save("my_scaler")    # → models/my_scaler.pkl
-svm.save("my_svm")      # → models/my_svm.pkl
+sc.save("my_scaler")    # -> models/my_scaler.pkl
+svm.save("my_svm")      # -> models/my_svm.pkl
 
-# 列出所有已保存模型
 print(ProxyEstimator.list_saved())   # ['my_scaler', 'my_svm', ...]
 
-# 加载（无需重新训练）
 sc2  = ProxyEstimator.load("my_scaler")
 svm2 = ProxyEstimator.load("my_svm")
 
-preds = svm2.predict(sc2.transform(X))  # 与保存前预测结果完全一致
+preds = svm2.predict(sc2.transform(X))  # same predictions as before saving
 ```
 
-模型文件存储在 `models/`，WSL2 通过 `/mnt/c/...` 写入，Windows 可直接访问 `.pkl` 文件。
+Model files are stored in `models/`; WSL2 writes them through `/mnt/c/...`, so Windows can open the `.pkl` files directly.
 
 ---
 
-## 开机自启动
+## Auto-start at logon
 
-桥接服务通过注册表 `HKCU\Run` 在用户**登录时自动启动**，无需任何手动操作。
+The bridge is started from the `HKCU\Run` registry key when the user logs on:
 
 ```
-用户登录
-  └─ HKCU\Run → start_bridge.bat
-       └─ wsl -d Ubuntu → start_server.sh
-            └─ nohup python server.py &   （后台，端口 19876）
-                 └─ 约 1 秒后，19876 端口就绪 ✅
+user logon
+  +- HKCU\Run -> start_bridge.bat
+       +- wsl -d <DISTRO> -> start_server.sh
+            +- nohup python server.py &   (background, port 19876)
+                 +- port 19876 ready about 1 second later
 ```
-
-验证注册表项：
 
 ```powershell
 Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" |
   Select-Object "GPU-sklearn-bridge"
-# GPU-sklearn-bridge : C:\Users\nicho\gpu-sklearn-bridge\start_bridge.bat
+# GPU-sklearn-bridge : %USERPROFILE%\gpu-sklearn-bridge\start_bridge.bat
 ```
 
-> **注意**：HKCU Run 在用户登录桌面时触发。执行 `wsl --shutdown` 后需手动重启，或重新登录。
+> **Note:** `HKCU\Run` fires when the user logs on to the desktop. After `wsl --shutdown` you must restart the bridge manually or log on again.
+
+`scripts/install_windows.ps1` registers a Task Scheduler task instead (it fills your user name and repository path into `scripts/GPU_sklearn_bridge.xml`).
 
 ---
 
-## 手动管理服务
+## Managing the service manually
 
 ```powershell
-# 启动
-C:\Users\nicho\gpu-sklearn-bridge\start_bridge.bat
+# start
+& "$env:USERPROFILE\gpu-sklearn-bridge\start_bridge.bat"
 
-# 健康检查
+# health check
 Invoke-RestMethod "http://127.0.0.1:19876/health"
 
-# 查看日志（在 WSL2 中）
+# logs (inside WSL2)
 wsl -d Ubuntu -- tail -f ~/gpu-sklearn-bridge/server.log
 
-# 停止（在 WSL2 中）
+# stop (inside WSL2)
 wsl -d Ubuntu -- pkill -f server.py
 ```
 
 ---
 
-## 文件结构
+## Repository layout
 
 ```
 gpu-sklearn-bridge/
-├── server.py                # Flask 桥接服务（运行于 WSL2）
-├── shm_transport.py         # 扩展 mmap 共享内存传输层（4 GB，16 slots）
-├── start_bridge.bat         # Windows 启动入口
-├── start_server.sh          # WSL2 启动脚本
-├── quickstart_check.py      # 快速环境验证脚本
-├── test_mmap.py             # 基础 mmap 传输层测试
-├── test_extended_mmap.py    # 扩展 mmap 集成测试（需要 WSL2+GPU）
-├── _local_test.py           # 本地单元测试（无需 WSL2/GPU）
-├── _train_test.py           # 端到端训练测试（需要 WSL2+GPU）
-├── _e2e_test.py             # 端到端集成测试
-├── scripts/
-│   ├── install_windows.ps1  # 一键安装脚本（注册自启动）
-│   └── start_bridge.ps1
-├── shm/                     # 共享内存文件目录（*.npy 旧格式残留）
-├── models/                  # 已保存的模型权重（*.pkl）
-├── cuml/                    # ← import cuml 别名层（最优体验）
-│   └── __init__.py
-├── cuml_proxy/              # Windows 代理包（核心）
-│   ├── proxy.py             # ProxyEstimator 核心
-│   ├── linear_model.py
-│   ├── cluster.py
-│   ├── decomposition.py
-│   ├── neighbors.py
-│   ├── ensemble.py
-│   ├── svm.py
-│   ├── preprocessing.py
-│   └── manifold.py
-└── windows_bridge/          # Windows hook 层
+|-- server.py                # Flask bridge server (runs in WSL2)
+|-- shm_transport.py         # extended mmap shared-memory transport (4 GB, 16 slots)
+|-- start_bridge.bat         # Windows entry point
+|-- start_server.sh          # WSL2 start script
+|-- quickstart_check.py      # quick environment check
+|-- test_mmap.py             # basic mmap transport test
+|-- test_extended_mmap.py    # extended mmap integration test (needs WSL2 + GPU)
+|-- _local_test.py           # local unit tests (no WSL2/GPU needed)
+|-- _train_test.py           # end-to-end training test (needs WSL2 + GPU)
+|-- _e2e_test.py             # end-to-end integration test
+|-- pyproject.toml           # pip install -e . for the Windows-side packages
+|-- scripts/
+|   |-- install_windows.ps1  # one-shot installer (registers auto-start)
+|   |-- start_bridge.ps1
+|   +-- GPU_sklearn_bridge.xml
+|-- docs/                    # design notes (Chinese)
+|-- shm/                     # shared-memory files
+|-- models/                  # saved model weights (*.pkl)
+|-- cuml/                    # <- import cuml alias layer
+|   +-- __init__.py
+|-- cuml_proxy/              # Windows proxy package (core)
+|   |-- proxy.py             # ProxyEstimator
+|   |-- linear_model.py
+|   |-- cluster.py
+|   |-- decomposition.py
+|   |-- neighbors.py
+|   |-- ensemble.py
+|   |-- svm.py
+|   |-- preprocessing.py
+|   +-- manifold.py
+|-- windows_bridge/          # legacy rpyc import hook
++-- wsl_server/              # legacy rpyc server + setup script
 
-# WSL2 端路径
-~/gpu-sklearn-bridge/shm/pool.bin   # 4 GB 预分配 mmap 池（首次使用自动创建）
-# Windows 访问：\\wsl.localhost\Ubuntu\home\<USER>\gpu-sklearn-bridge\shm\pool.bin
+# WSL2 side
+~/gpu-sklearn-bridge/shm/pool.bin   # 4 GB pre-allocated mmap pool (created on first use)
+# reached from Windows as: \\wsl.localhost\<DISTRO>\home\<USER>\gpu-sklearn-bridge\shm\pool.bin
 ```
 
 ---
 
-## 性能参考
+## Benchmarks
 
-> 测试日期：2026-02-26 / RTX 4060 Laptop 8 GB / 扩展 mmap（4 GB pool，16 slots 轮转）
-> pool.bin 存于 WSL2 Linux FS，Windows 经 UNC `\\wsl.localhost\...` + `fd.seek+read` 读取
+> Copied verbatim from the original README; **not re-run** for this revision.
+> Test date: 2026-02-26 / RTX 4060 Laptop 8 GB / extended mmap (4 GB pool, 16 rotating slots)
+> pool.bin on the WSL2 Linux FS, read from Windows through UNC `\\wsl.localhost\...` + `fd.seek+read`
 
-**端到端训练测试（_train_test.py，全部 17/17 通过）：**
+**End-to-end training test (`_train_test.py`, 17/17 passed):**
 
-| 场景 | 数组大小 | 耗时 |
+| Scenario | Array size | Time |
 |---|---|---|
-| fit_transform（StandardScaler） | 5000×20 | 563 ms |
-| fit_transform（PCA, n=5） | 5000×20 | 231 ms |
-| fit + predict（LinearRegression，R²=1.0） | 5000×20 | 36 + 32 ms |
-| fit + predict（LogisticRegression，acc=0.998） | 5000×20 | 135 + 33 ms |
-| fit_predict（KMeans k=3） | 5000×20 | 107 ms |
-| fit + predict（RandomForestClassifier，acc=1.0） | 500×20 | 179 + 35 ms |
-| fit + predict（SVC rbf，acc=1.0） | 500×20 | 79 + 7 ms |
-| fit_transform 压力测试（~51 MB） | 10000×1280 | 4185 ms（12 MB/s 等效吞吐） |
+| fit_transform (StandardScaler) | 5000x20 | 563 ms |
+| fit_transform (PCA, n=5) | 5000x20 | 231 ms |
+| fit + predict (LinearRegression, R²=1.0) | 5000x20 | 36 + 32 ms |
+| fit + predict (LogisticRegression, acc=0.998) | 5000x20 | 135 + 33 ms |
+| fit_predict (KMeans k=3) | 5000x20 | 107 ms |
+| fit + predict (RandomForestClassifier, acc=1.0) | 500x20 | 179 + 35 ms |
+| fit + predict (SVC rbf, acc=1.0) | 500x20 | 79 + 7 ms |
+| fit_transform stress test (~51 MB) | 10000x1280 | 4185 ms (12 MB/s effective throughput) |
 
-**Iris 数据集 5-Fold Cross Validation：**
+**Iris dataset, 5-fold cross validation:**
 
-| 模型 | 均值准确率 | ±std |
+| Model | Mean accuracy | ±std |
 |---|---|---|
 | SVC (RBF) | **0.9667** | ±0.0211 |
 | RandomForestClassifier (100) | 0.9600 | ±0.0249 |
@@ -372,40 +358,49 @@ gpu-sklearn-bridge/
 
 ---
 
-## 已知限制
+## Known limits
 
-| 限制 | 说明 |
+| Limit | Notes |
 |---|---|
-| mmap 单次上限 256 MB | 单个数组超过 256 MB 会报错（单 slot 容量），可通过增加 `SLOT_SIZE` 或分批处理解决 |
-| 总 pool 上限 4 GB | 若工作集持续超过 4 GB，需扩大 `POOL_SIZE` 并重建 pool.bin |
-| 非真正零拷贝 | Windows 通过 P9 协议（`\\wsl.localhost\...` UNC）访问 WSL2 Linux FS，每次 `fd.read` 有一次跨系统 I/O；非 AF_VSOCK 级零拷贝 |
-| 需要用户登录才自启 | HKCU Run 在登录桌面时触发，`wsl --shutdown` 后需手动重启 |
-| 代理软件冲突 | 已处理（`trust_env=False`），Clash/V2Ray 不影响桥接请求 |
-| Windows Server 不支持 WSL2 | 此方案仅适用于 Windows 10/11 桌面系统 |
+| 256 MB per mmap transfer | a single array larger than 256 MB (one slot) raises an error; increase `SLOT_SIZE` or split the data |
+| 4 GB total pool | if the working set keeps exceeding 4 GB, increase `POOL_SIZE` and recreate pool.bin |
+| Not true zero-copy | Windows reaches the WSL2 Linux FS over the P9 protocol (`\\wsl.localhost\...` UNC); every `fd.read` is one cross-system I/O, not AF_VSOCK-level zero-copy |
+| Auto-start needs a logon | `HKCU\Run` fires at desktop logon; after `wsl --shutdown` the bridge must be restarted by hand |
+| Proxy software | handled (`trust_env=False`); Clash/V2Ray do not intercept bridge requests |
+| Windows Server | WSL2 is not available there; this only targets Windows 10/11 desktop |
 
 ---
 
-## 导入方式对比
+## Environment variables
 
-```python
-# 方式 1：最优体验，与官方 cuML 写法完全一致 ✅
-import cuml
-from cuml.svm import SVC
+All variables are optional. **When none of them is set, every script and module behaves exactly as before** (paths are derived from the location of the script, from `%USERPROFILE%` / `$HOME`, or from the current user name).
 
-# 方式 2：显式代理包写法，效果相同
-from cuml_proxy.svm import SVC
+| Variable | Used by | Default |
+|---|---|---|
+| `SKLEARN_BRIDGE_PORT` | `server.py`, `cuml_proxy` | `19876` |
+| `SKLEARN_BRIDGE_SHARED` | `server.py`, `cuml_proxy` | `<repo>/shm` (Windows) / `/mnt/c/Users/<win user>/gpu-sklearn-bridge/shm` (WSL2) |
+| `SKLEARN_BRIDGE_MODELS` | `server.py`, `cuml_proxy` | `<repo>/models` (Windows) / `/mnt/c/Users/<win user>/gpu-sklearn-bridge/models` (WSL2) |
+| `SKLEARN_BRIDGE_HOME` | `start_bridge.bat`, `scripts/*.ps1`, `wsl_server/setup.sh`, `cuml_proxy`, tests | directory of the script / repository root; in `start_server.sh` it is the WSL2 clone, default `$HOME/gpu-sklearn-bridge` |
+| `SKLEARN_BRIDGE_PYTHON` | `start_server.sh` | `$HOME/envs/gpu-sklearn/bin/python` |
+| `SKLEARN_BRIDGE_POOL` | `shm_transport.py` | Windows: `\\wsl.localhost\<DISTRO>\home\<wsl user>\gpu-sklearn-bridge\shm\pool.bin`; WSL2: `$HOME/gpu-sklearn-bridge/shm/pool.bin` |
+| `SKLEARN_BRIDGE_WSL_DISTRO` | `start_bridge.bat`, `scripts/*.ps1`, `shm_transport.py` | `Ubuntu` |
+| `SKLEARN_BRIDGE_WSL_USER` | `scripts/*.ps1`, `shm_transport.py` | the Windows user name (`%USERNAME%`) |
+| `SKLEARN_BRIDGE_WIN_USER` | `server.py` (inside WSL2) | the current Linux user name |
+| `SKLEARN_BRIDGE_VENV` | `scripts/install_windows.ps1` | `%USERPROFILE%\envs\gpu-sklearn` |
 
-# 方式 3：CPU 版 scikit-learn，不走 GPU
-from sklearn.svm import SVC
+Example (PowerShell):
+
+```powershell
+$Env:SKLEARN_BRIDGE_PORT   = "19876"
+$Env:SKLEARN_BRIDGE_SHARED = "$env:USERPROFILE\gpu-sklearn-bridge\shm"
+$Env:SKLEARN_BRIDGE_MODELS = "$env:USERPROFILE\gpu-sklearn-bridge\models"
 ```
 
-`cuml` 和 `cuml_proxy` 指向完全相同的对象，`cuml` 是 `cuml_proxy` 的别名层，选任意一种写法即可。
-
 ---
 
-## 依赖
+## Dependencies
 
-**Windows 环境**
+**Windows**
 
 ```
 Python  3.11+
@@ -413,7 +408,7 @@ numpy
 requests
 ```
 
-**WSL2 环境**
+**WSL2**
 
 ```
 Python  3.11+
@@ -425,15 +420,15 @@ flask
 
 ## Contributing
 
-欢迎提交 Issue 或 Pull Request！
+Issues and pull requests are welcome.
 
-- **Bug 报告**：请提供 OS、驱动、cuML 版本，以及完整错误日志（`server.log`）。
-- **新算法支持**：在 `cuml_proxy/` 下添加对应模块，并在 `server.py` 的 `_CLASS_MAP` 中注册即可。
-- **性能优化**：传输层代码位于 `shm_transport.py`，欢迎探索 AF_VSOCK 或 virtio-fs 等零拷贝方案。
+- **Bug reports**: include OS, driver and cuML versions plus the full error log (`server.log`).
+- **New estimators**: add the class to the matching module in `cuml_proxy/` and register it in `_CLASS_MAP` in `server.py`.
+- **Performance**: the transport layer is `shm_transport.py`; zero-copy approaches such as AF_VSOCK or virtio-fs are open for exploration.
 
-请确保：
-1. 新增代码通过 `_local_test.py` 本地测试。
-2. 涉及 GPU 计算的功能通过 `_train_test.py` 端到端测试。
+Please make sure that:
+1. new code passes `_local_test.py` locally;
+2. anything touching GPU computation passes the `_train_test.py` end-to-end test.
 
 ---
 
