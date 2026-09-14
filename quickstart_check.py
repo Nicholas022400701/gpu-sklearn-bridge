@@ -11,7 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
-BRIDGE_DIR = Path(__file__).parent
+BRIDGE_DIR = Path(os.environ.get("SKLEARN_BRIDGE_HOME") or Path(__file__).resolve().parent)
 SHM_DIR = BRIDGE_DIR / "shm"
 POOL_BIN = SHM_DIR / "pool.bin"
 
@@ -138,16 +138,16 @@ def main():
     print("\n" + "="*70)
     print(" 🎯 后续步骤:")
     print("="*70)
-    print("""
+    print(f"""
 1. 启动 WSL2 服务端（在 WSL2 中）:
-   cd /mnt/c/Users/nicho/gpu-sklearn-bridge
+   cd /mnt/c/Users/<USER>/gpu-sklearn-bridge   # 或你的 WSL2 侧仓库路径
    python server.py
    
    等待看到：
    [ShmTransport] 初始化 mmap pool: ... (4.0 GB)
 
 2. 启动 Windows 客户端测试（新终端窗口）:
-   cd C:\\Users\\nicho\\gpu-sklearn-bridge
+   cd {BRIDGE_DIR}
    python test_extended_mmap.py
    
    预期：所有测试通过 ✅
@@ -157,9 +157,9 @@ def main():
    - 应该 < 1000 ms 处理 500 MB 数据
    
 4. 查看详细文档:
-   - EXTENDED_MMAP_OPTIMIZATION.md    —— 优化报告
-   - MMAP_CONFIG_GUIDE.md             —— 配置指南
-   - MIGRATION_CHECKLIST.md           —— 迁移清单
+   - docs/EXTENDED_MMAP_OPTIMIZATION.md    —— 优化报告
+   - docs/MMAP_CONFIG_GUIDE.md             —— 配置指南
+   - docs/MIGRATION_CHECKLIST.md           —— 迁移清单
     """)
     
     print("="*70)

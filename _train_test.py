@@ -5,11 +5,12 @@ _train_test.py - 端对端训练测试（需要 WSL2 + GPU）
       KMeans / RandomForestClassifier / SVC
 测试内容：fit / predict / transform / score / fit_transform
 """
-import sys, time
+import sys, time, os
 import numpy as np
 import requests
 
-sys.path.insert(0, r"C:\Users\nicho\gpu-sklearn-bridge")
+# 仓库路径：SKLEARN_BRIDGE_HOME，未设置时为本文件所在目录
+sys.path.insert(0, os.environ.get("SKLEARN_BRIDGE_HOME") or os.path.dirname(os.path.abspath(__file__)))
 
 from cuml.preprocessing  import StandardScaler
 from cuml.decomposition  import PCA
@@ -47,7 +48,7 @@ def fail(msg, err):
     print(line)
     results.append((False, msg, 0))
 
-# ── 数据集 ──────────────────────────────────────────────────────
+# ── 数据集 ──────────────────────────────────────────────────────────────
 N_SMALL  = 500
 N_MEDIUM = 5000
 FEATS    = 20
@@ -60,7 +61,7 @@ y_reg    = (X_medium @ np.random.randn(FEATS).astype(np.float32)).astype(np.floa
 y_cls    = (X_medium[:, 0] > 0).astype(np.int32)
 y_small_cls = (X_small[:, 0] > 0).astype(np.int32)
 
-# ── 1. StandardScaler ────────────────────────────────────────────
+# ── 1. StandardScaler ────────────────────────────────────────────────────
 section("1. StandardScaler")
 try:
     sc = StandardScaler()
@@ -79,7 +80,7 @@ try:
 except Exception as e:
     fail("StandardScaler", e)
 
-# ── 2. PCA ───────────────────────────────────────────────────────
+# ── 2. PCA ───────────────────────────────────────────────────────────────
 section("2. PCA  (n_components=5)")
 try:
     pca = PCA(n_components=5)
@@ -94,7 +95,7 @@ try:
 except Exception as e:
     fail("PCA", e)
 
-# ── 3. LinearRegression ───────────────────────────────────────────
+# ── 3. LinearRegression ───────────────────────────────────────────────────
 section("3. LinearRegression")
 try:
     lr = LinearRegression()
@@ -120,7 +121,7 @@ try:
 except Exception as e:
     fail("LinearRegression", e)
 
-# ── 4. LogisticRegression ─────────────────────────────────────────
+# ── 4. LogisticRegression ─────────────────────────────────────────────────
 section("4. LogisticRegression  (binary)")
 try:
     scaler = StandardScaler()
@@ -149,7 +150,7 @@ try:
 except Exception as e:
     fail("LogisticRegression", e)
 
-# ── 5. KMeans ─────────────────────────────────────────────────────
+# ── 5. KMeans ─────────────────────────────────────────────────────────────
 section("5. KMeans  (k=3)")
 try:
     km = KMeans(n_clusters=3, random_state=0)
@@ -164,7 +165,7 @@ try:
 except Exception as e:
     fail("KMeans", e)
 
-# ── 6. RandomForestClassifier ─────────────────────────────────────
+# ── 6. RandomForestClassifier ─────────────────────────────────────────────
 section("6. RandomForestClassifier  (n_estimators=50)")
 try:
     rf = RandomForestClassifier(n_estimators=50, random_state=0)
@@ -187,7 +188,7 @@ try:
 except Exception as e:
     fail("RandomForestClassifier", e)
 
-# ── 7. SVC ────────────────────────────────────────────────────────
+# ── 7. SVC ────────────────────────────────────────────────────────────────
 section("7. SVC  (kernel=rbf, C=1)")
 try:
     sc7 = StandardScaler()
@@ -210,7 +211,7 @@ try:
 except Exception as e:
     fail("SVC", e)
 
-# ── 8. 大数组 mmap 传输（~100 MB 输入）─────────────────────────────
+# ── 8. 大数组 mmap 传输（~100 MB 输入）─────────────────────────────────
 section("8. 大数组 mmap 传输压力测试  (~100 MB)")
 try:
     X_big = np.random.randn(10000, 1280).astype(np.float32)
@@ -226,7 +227,7 @@ try:
 except Exception as e:
     fail("大数组 mmap", e)
 
-# ── 汇总 ─────────────────────────────────────────────────────────
+# ── 汇总 ───────────────────────────────────────────────────────────────
 section("测试结果汇总")
 passed = [r for r in results if r[0]]
 failed = [r for r in results if not r[0]]
