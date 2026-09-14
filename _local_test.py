@@ -29,7 +29,7 @@ print("=" * 60)
 print(" shm_transport local unit tests")
 print("=" * 60)
 
-# ── 常量检查 ────────────────────────────────────────────────────────
+# ── 常量检查 ──────────────────────────────────────────────────
 print("\n[1] 常量检查")
 check(mod.SLOT_SIZE == 256 * 1024 * 1024,       f"SLOT_SIZE = 256 MB")
 check(mod.INPUT_SLOT_COUNT == 4,                 f"INPUT_SLOT_COUNT = 4")
@@ -42,17 +42,17 @@ check(mod.SLOT_OUTPUT_START == 4,                f"SLOT_OUTPUT_START = 4")
 check(mod.SLOT_SCRATCH_START == 8,               f"SLOT_SCRATCH_START = 8")
 check(mod.MMAP_THRESHOLD == 10 * 1024,           f"MMAP_THRESHOLD = 10 KB")
 
-# ── ShmTransport 初始化 ────────────────────────────────────────────────────
+# ── ShmTransport 初始化 ────────────────────────────────────────
 print("\n[2] ShmTransport 初始化")
 t = mod.ShmTransport.get()
 check(t is not None, "单例创建成功")
 check(mod.ShmTransport.get() is t, "单例复用（is 判断）")
 
-pool_path = mod._pool_path()
+pool_path = os.path.join(BRIDGE_DIR, "shm", "pool.bin")
 pool_size = os.path.getsize(pool_path)
 check(pool_size == mod.POOL_SIZE, f"pool.bin 大小 = {pool_size/1e9:.1f} GB")
 
-# ── write / read 往返 ──────────────────────────────────────────────────────
+# ── write / read 往返 ──────────────────────────────────────────
 print("\n[3] write / read 往返")
 
 arr_s = np.arange(100, dtype=np.float32).reshape(10, 10)
@@ -74,20 +74,20 @@ check(np.allclose(arr_m, arr_back_m), f"中等数组 {mb:.0f} MB 往返数值一
 print(f"       write={write_ms:.1f} ms  read={read_ms:.1f} ms  "
       f"吞吐≈{mb/(write_ms/1000)/1e3:.0f} GB/s")
 
-# ── 输入 slot 轮转 ─────────────────────────────────────────────────────
+# ── 输入 slot 轮转 ─────────────────────────────────────────────
 print("\n[4] 输入 slot 轮转（is_output=False）")
 # 重置计数器以便测试
 t._input_counter = 0
 slots = [t.write(np.zeros(1, dtype=np.float32))["slot"] for _ in range(8)]
 check(slots == [0, 1, 2, 3, 0, 1, 2, 3], f"序列 {slots}")
 
-# ── 输出 slot 轮转 ─────────────────────────────────────────────────────
+# ── 输出 slot 轮转 ─────────────────────────────────────────────
 print("\n[5] 输出 slot 轮转（is_output=True）")
 t._output_counter = 0
 slots_out = [t.write(np.zeros(1, dtype=np.float32), is_output=True)["slot"] for _ in range(8)]
 check(slots_out == [4, 5, 6, 7, 4, 5, 6, 7], f"序列 {slots_out}")
 
-# ── 不同 dtype 和形状 ──────────────────────────────────────────────────
+# ── 不同 dtype 和形状 ──────────────────────────────────────────
 print("\n[6] 多种 dtype 和形状")
 for dtype in [np.float32, np.float64, np.int32, np.int64]:
     arr = np.random.rand(100, 50).astype(dtype)
@@ -96,7 +96,7 @@ for dtype in [np.float32, np.float64, np.int32, np.int64]:
     check(back.shape == arr.shape and back.dtype == arr.dtype and np.allclose(arr, back),
           f"dtype={dtype.__name__}  shape=(100,50)")
 
-# ── proxy._encode_array 行为 ──────────────────────────────────────────────
+# ── proxy._encode_array 行为 ──────────────────────────────────
 print("\n[7] proxy._encode_array 行为")
 from cuml_proxy.proxy import _encode_array, _decode_array, MMAP_THRESHOLD
 
@@ -110,14 +110,14 @@ enc_big = _encode_array(big)
 check(enc_big.get("__mmap__") is True,       "大数组走 __mmap__")
 check("__ndarray__" not in enc_big,           "大数组不走 base64")
 
-# ── _decode_array 往返 ──────────────────────────────────────────────────
+# ── _decode_array 往返 ────────────────────────────────────────
 print("\n[8] proxy._decode_array 往返")
 arr_orig = np.arange(200, dtype=np.float64).reshape(20, 10)
 enc = _encode_array(arr_orig)
 dec = _decode_array(enc)
 check(np.allclose(arr_orig, dec), f"encode→decode 数值一致（dtype={arr_orig.dtype}）")
 
-# ── server._encode_result 行为 ──────────────────────────────────────────────
+# ── server._encode_result 行为 ────────────────────────────────
 print("\n[9] server._encode_result（读取 server.py 函数）")
 import importlib.util as ilu, types
 
@@ -128,7 +128,7 @@ check(not has_npy_fallback, "server.py 中无 .npy fallback（uuid + np.save）"
 has_is_output = "is_output=True" in src
 check(has_is_output, "server.py 使用 is_output=True 轮转分配")
 
-# ── pool.bin 文件检查 ────────────────────────────────────────────────────
+# ── pool.bin 文件检查 ──────────────────────────────────────────
 print("\n[10] shm/ 目录检查（无残留 .npy 文件）")
 import glob
 npy_files = glob.glob(os.path.join(BRIDGE_DIR, "shm", "????????????????????????????????????????.npy"))
