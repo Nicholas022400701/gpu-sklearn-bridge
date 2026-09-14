@@ -7,11 +7,13 @@ test_extended_mmap.py - 验证扩展 mmap 架构（多 slot + 无 .npy fallback�
   3. 大数组（256 MB - 1 GB）—— 多 slot 轮转传输（扩展 mmap）
   4. 性能对比：原 .npy fallback vs 新扩展 mmap
 """
+import os
 import sys
 import time
 import numpy as np
 
-sys.path.insert(0, r"C:\Users\nicho\gpu-sklearn-bridge")
+# 仓库路径：SKLEARN_BRIDGE_HOME，未设置时为本文件所在目录
+sys.path.insert(0, os.environ.get("SKLEARN_BRIDGE_HOME") or os.path.dirname(os.path.abspath(__file__)))
 from cuml_proxy.preprocessing import StandardScaler
 from cuml_proxy.decomposition import PCA
 from cuml_proxy.linear_model import LinearRegression
@@ -104,7 +106,7 @@ for i in range(4):
     del sc
 print(f"    平均耗时: {np.mean(times)*1000:.1f} ms  (稳定性: ±{np.std(times)*1000:.1f} ms)")
 
-# ── 6. 验证输出正确性（大数据）────────────────────────────────
+# ── 6. 验证输出正确性（大数据）──────────────────────────────
 print("\n[6] 正确性验证 —— 大数组的降维结果")
 X_large = np.random.randn(5000, 100).astype(np.float32)
 pca_verify = PCA(n_components=10)
@@ -115,7 +117,7 @@ assert np.all(np.isfinite(X_reduced)), "包含 NaN 或 Inf"
 print("    ✅  形状和数值正确")
 del pca_verify
 
-# ── 7. 混合大小请求序列────────────────────────────────────────────
+# ── 7. 混合大小请求序列────────────────────────────────────────
 print("\n[7] 混合大小请求序列（测试 base64 + mmap + mmap...）")
 sizes = [
     (100, 10, "小"),      # ~4 KB

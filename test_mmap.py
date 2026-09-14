@@ -7,12 +7,13 @@ test_mmap.py - 验证 mmap 共享内存传输层是否正常工作
   3. 结果解码正确性（fit_transform / predict 返回值一致）
   4. 传输带宽粗测（100 MB 数组耗时）
 """
+import os
 import sys
 import time
 import numpy as np
 
-# 使用桥接包
-sys.path.insert(0, r"C:\Users\nicho\gpu-sklearn-bridge")
+# 使用桥接包（仓库路径：SKLEARN_BRIDGE_HOME，未设置时为本文件所在目录）
+sys.path.insert(0, os.environ.get("SKLEARN_BRIDGE_HOME") or os.path.dirname(os.path.abspath(__file__)))
 from cuml_proxy.preprocessing import StandardScaler
 from cuml_proxy.decomposition import PCA
 from cuml_proxy.linear_model import LinearRegression
@@ -57,7 +58,7 @@ print(f"    耗时: {elapsed*1000:.1f} ms")
 print(f"    等效吞吐: {X_big.nbytes/elapsed/1e6:.1f} MB/s（含 HTTP + GPU）")
 del sc3
 
-# ── 4. 结果正确性验证（PCA）────────────────────────────────────────
+# ── 4. 结果正确性验证（PCA）──────────────────────────────────
 print("\n[4] 正确性验证 —— PCA 降维到 2D")
 X_iris = np.random.randn(150, 4).astype(np.float32)
 pca = PCA(n_components=2)
@@ -66,7 +67,7 @@ print(f"    输入: {X_iris.shape}  →  输出: {X_pca.shape}")
 assert X_pca.shape == (150, 2), f"形状错误: {X_pca.shape}"
 print("    ✅  形状正确")
 
-# ── 5. 大数组往返（输入 + 输出均走 mmap）────────────────────────────
+# ── 5. 大数组往返（输入 + 输出均走 mmap）────────────────────────
 print("\n[5] 大数组输入 + 大数组输出往返")
 X_big2 = np.random.rand(10000, 20).astype(np.float32)  # 800 KB
 lr = LinearRegression()

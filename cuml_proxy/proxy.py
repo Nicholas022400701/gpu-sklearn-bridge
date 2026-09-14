@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import requests
 
-# ── 加载 mmap 传输层 ────────────────────────────────────────────────────────────────
+# ── 加载 mmap 传输层 ──────────────────────────────────────────────────────────────────
 _shm_file = Path(__file__).parent.parent / "shm_transport.py"
 _shm_spec = importlib.util.spec_from_file_location("shm_transport", _shm_file)
 _shm_mod  = importlib.util.module_from_spec(_shm_spec)
@@ -26,10 +26,11 @@ _BRIDGE_URL = f"http://127.0.0.1:{_BRIDGE_PORT}"
 _TIMEOUT = 30  # seconds per request
 
 # 共享文件传输路径（Windows 视角）
-_SHARED_DIR_WIN = Path(os.environ.get("SKLEARN_BRIDGE_SHARED",
-    r"C:\Users\nicho\gpu-sklearn-bridge\shm"))
-_MODELS_DIR_WIN = Path(os.environ.get("SKLEARN_BRIDGE_MODELS",
-    r"C:\Users\nicho\gpu-sklearn-bridge\models"))
+# 默认为仓库根目录（本文件的上两级）下的 shm/ 与 models/，可用 SKLEARN_BRIDGE_HOME 指定仓库根目录，
+# 或用 SKLEARN_BRIDGE_SHARED / SKLEARN_BRIDGE_MODELS 直接指定完整路径。
+_BRIDGE_HOME = Path(os.environ.get("SKLEARN_BRIDGE_HOME") or Path(__file__).resolve().parent.parent)
+_SHARED_DIR_WIN = Path(os.environ.get("SKLEARN_BRIDGE_SHARED") or (_BRIDGE_HOME / "shm"))
+_MODELS_DIR_WIN = Path(os.environ.get("SKLEARN_BRIDGE_MODELS") or (_BRIDGE_HOME / "models"))
 _ARRAY_FILE_THRESHOLD = 10 * 1024  # 10 KB：超过此大小写共享文件
 
 # 专用 Session，强制绕过系统代理（HTTP_PROXY / HTTPS_PROXY 等环境变量）
@@ -52,7 +53,7 @@ def wait_for_server(timeout: int = 30) -> bool:
     return False
 
 
-# ── Array serialisation ───────────────────────────────────────────────────────
+# ── Array serialisation ─────────────────────────────────────────────────────────────
 
 def _encode_array(arr):
     if isinstance(arr, np.ndarray):
@@ -193,7 +194,7 @@ class ProxyEstimator:
         self._ensure_created()
         return self
 
-    # ── 持久化 ────────────────────────────────────────────────────────────────
+    # ── 持久化 ──────────────────────────────────────────────────────────────
 
     def save(self, name: str) -> str:
         """将模型 pickle 到共享目录，之后可用 ProxyEstimator.load(name) 恢复。

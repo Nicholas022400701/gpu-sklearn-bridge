@@ -10,10 +10,11 @@ import traceback
 import os
 import sys
 import uuid
+import getpass
 
 from flask import Flask, request, jsonify
 
-# ── mmap 共享内存传输 ────────────────────────────────────────────────────────────────
+# ── mmap 共享内存传输 ────────────────────────────────────────────────────
 import importlib, importlib.util
 _shm_spec = importlib.util.spec_from_file_location(
     "shm_transport",
@@ -26,7 +27,7 @@ SLOT_INPUT_START   = _shm_mod.SLOT_INPUT_START
 SLOT_OUTPUT_START  = _shm_mod.SLOT_OUTPUT_START
 MMAP_THRESHOLD = _shm_mod.MMAP_THRESHOLD
 
-# ── cuML imports ──────────────────────────────────────────────────────────────
+# ── cuML imports ───────────────────────────────────────────────────────────────
 import cuml
 import cuml.linear_model
 import cuml.cluster
@@ -41,10 +42,13 @@ import numpy as np
 app = Flask(__name__)
 
 # ── 共享文件系统路径（Windows 和 WSL2 均可访问相同物理位置）────────────────────
-SHARED_DIR = os.environ.get("SKLEARN_BRIDGE_SHARED",
-    "/mnt/c/Users/nicho/gpu-sklearn-bridge/shm")
-MODELS_DIR = os.environ.get("SKLEARN_BRIDGE_MODELS",
-    "/mnt/c/Users/nicho/gpu-sklearn-bridge/models")
+# 默认指向 Windows 用户目录下的仓库：/mnt/c/Users/<Windows 用户名>/gpu-sklearn-bridge/…
+# Windows 用户名默认取当前 Linux 用户名（两侧同名时无需配置），可用 SKLEARN_BRIDGE_WIN_USER 覆盖；
+# 也可直接用 SKLEARN_BRIDGE_SHARED / SKLEARN_BRIDGE_MODELS 指定完整路径。
+_WIN_USER = os.environ.get("SKLEARN_BRIDGE_WIN_USER") or getpass.getuser()
+_WIN_BRIDGE_DIR = f"/mnt/c/Users/{_WIN_USER}/gpu-sklearn-bridge"
+SHARED_DIR = os.environ.get("SKLEARN_BRIDGE_SHARED", f"{_WIN_BRIDGE_DIR}/shm")
+MODELS_DIR = os.environ.get("SKLEARN_BRIDGE_MODELS", f"{_WIN_BRIDGE_DIR}/models")
 ARRAY_FILE_THRESHOLD = 10 * 1024  # 10 KB：超过此大小写共享文件，避免 base64 膨胀
 os.makedirs(SHARED_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)

@@ -153,7 +153,7 @@ def _decode_array(obj):
 ```bash
 # 旧的 512 MB pool.bin 可删除或保留
 # 系统会自动在首次运行时创建新的 4 GB pool
-rm c:\Users\nicho\gpu-sklearn-bridge\shm\pool.bin
+rm c:\Users\<USER>\gpu-sklearn-bridge\shm\pool.bin
 ```
 
 ### 2. 启动服务

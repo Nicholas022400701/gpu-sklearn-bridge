@@ -81,10 +81,10 @@ SCRATCH_SLOT_COUNT = 0
 
 ```bash
 # Windows
-dir C:\Users\nicho\gpu-sklearn-bridge\shm\pool.bin
+dir %USERPROFILE%\gpu-sklearn-bridge\shm\pool.bin
 
 # WSL2
-ls -lh /mnt/c/Users/nicho/gpu-sklearn-bridge/shm/pool.bin
+ls -lh /mnt/c/Users/<USER>/gpu-sklearn-bridge/shm/pool.bin
 
 # 预期大小（4 GB）：4294967296 bytes
 ```
@@ -128,7 +128,7 @@ ERROR: pool.bin 只有 512 MB，不是 4 GB
 
 **解决**：
 ```bash
-rm C:\Users\nicho\gpu-sklearn-bridge\shm\pool.bin
+rm C:\Users\<USER>\gpu-sklearn-bridge\shm\pool.bin
 # 重启服务端，会自动创建新的 4 GB pool
 ```
 

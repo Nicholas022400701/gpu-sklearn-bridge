@@ -1,15 +1,17 @@
 """
 _local_test.py - 本地单元测试（不需要 WSL2/GPU，仅测试 shm_transport 层）
+仓库路径：SKLEARN_BRIDGE_HOME，未设置时为本文件所在目录
 """
-import sys, time
+import sys, time, os
 import numpy as np
 
-sys.path.insert(0, r"C:\Users\nicho\gpu-sklearn-bridge")
+BRIDGE_DIR = os.environ.get("SKLEARN_BRIDGE_HOME") or os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BRIDGE_DIR)
 
 import importlib.util
 spec = importlib.util.spec_from_file_location(
     "shm_transport",
-    r"C:\Users\nicho\gpu-sklearn-bridge\shm_transport.py"
+    os.path.join(BRIDGE_DIR, "shm_transport.py")
 )
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
@@ -46,8 +48,7 @@ t = mod.ShmTransport.get()
 check(t is not None, "单例创建成功")
 check(mod.ShmTransport.get() is t, "单例复用（is 判断）")
 
-import os
-pool_path = r"C:\Users\nicho\gpu-sklearn-bridge\shm\pool.bin"
+pool_path = os.path.join(BRIDGE_DIR, "shm", "pool.bin")
 pool_size = os.path.getsize(pool_path)
 check(pool_size == mod.POOL_SIZE, f"pool.bin 大小 = {pool_size/1e9:.1f} GB")
 
@@ -121,7 +122,7 @@ print("\n[9] server._encode_result（读取 server.py 函数）")
 import importlib.util as ilu, types
 
 # 仅加载 _encode_result 函数逻辑，跳过 cuml import
-src = open(r"C:\Users\nicho\gpu-sklearn-bridge\server.py", encoding="utf-8").read()
+src = open(os.path.join(BRIDGE_DIR, "server.py"), encoding="utf-8").read()
 has_npy_fallback = "uuid.uuid4().hex" in src and "np.save" in src and "__file__" in src
 check(not has_npy_fallback, "server.py 中无 .npy fallback（uuid + np.save）")
 has_is_output = "is_output=True" in src
@@ -130,7 +131,7 @@ check(has_is_output, "server.py 使用 is_output=True 轮转分配")
 # ── pool.bin 文件检查 ──────────────────────────────────────────
 print("\n[10] shm/ 目录检查（无残留 .npy 文件）")
 import glob
-npy_files = glob.glob(r"C:\Users\nicho\gpu-sklearn-bridge\shm\????????????????????????????????????????.npy")
+npy_files = glob.glob(os.path.join(BRIDGE_DIR, "shm", "????????????????????????????????????????.npy"))
 check(len(npy_files) == 0,
       f"无 UUID.npy 残留文件（当前 {len(npy_files)} 个）")
 

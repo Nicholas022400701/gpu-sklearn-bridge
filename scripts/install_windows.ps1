@@ -1,15 +1,25 @@
 # GPU sklearn bridge - Windows 端一键安装脚本
 # 执行内容：
-#   1. 在 C:\Users\nicho\envs\gpu-sklearn (已有 uv venv) 中安装 rpyc
+#   1. 在 %USERPROFILE%\envs\gpu-sklearn (uv venv) 中安装 rpyc
 #   2. 将 windows_bridge 包复制到该 venv 的 site-packages
 #   3. 创建 .pth 文件实现 Python 启动时自动加载 hook
 #   4. 注册 Task Scheduler 开机自启任务
+#
+# 路径来源（均可用环境变量覆盖，未设置时与原脚本行为一致）：
+#   SKLEARN_BRIDGE_HOME        仓库根目录，默认为本脚本所在目录的上一级
+#   SKLEARN_BRIDGE_VENV        Windows venv 目录，默认 %USERPROFILE%\envs\gpu-sklearn
+#   SKLEARN_BRIDGE_WSL_DISTRO  WSL2 发行版，默认 Ubuntu
+#   SKLEARN_BRIDGE_WSL_USER    WSL2 用户名，默认与 Windows 用户名相同
 
 $ErrorActionPreference = "Stop"
-$BridgeRoot    = "C:\Users\nicho\gpu-sklearn-bridge"
-$VenvPython    = "C:\Users\nicho\envs\gpu-sklearn\Scripts\python.exe"
-$VenvSitePkg   = "C:\Users\nicho\envs\gpu-sklearn\Lib\site-packages"
-$TaskXml       = "$BridgeRoot\scripts\GPU_sklearn_bridge.xml"
+$BridgeRoot    = if ($env:SKLEARN_BRIDGE_HOME) { $env:SKLEARN_BRIDGE_HOME } else { Split-Path -Parent $PSScriptRoot }
+$VenvRoot      = if ($env:SKLEARN_BRIDGE_VENV) { $env:SKLEARN_BRIDGE_VENV } else { Join-Path $env:USERPROFILE "envs\gpu-sklearn" }
+$WslDistro     = if ($env:SKLEARN_BRIDGE_WSL_DISTRO) { $env:SKLEARN_BRIDGE_WSL_DISTRO } else { "Ubuntu" }
+$WslUser       = if ($env:SKLEARN_BRIDGE_WSL_USER) { $env:SKLEARN_BRIDGE_WSL_USER } else { $env:USERNAME }
+$VenvPython    = "$VenvRoot\Scripts\python.exe"
+$VenvSitePkg   = "$VenvRoot\Lib\site-packages"
+$TaskXmlTpl    = "$BridgeRoot\scripts\GPU_sklearn_bridge.xml"
+$TaskXml       = Join-Path $env:TEMP "GPU_sklearn_bridge.xml"
 $TaskName      = "GPU_sklearn_bridge"
 
 Write-Host "========================================"
@@ -19,12 +29,12 @@ Write-Host "========================================"
 # ── 1. 验证 uv venv 存在 ──────────────────────────
 if (-not (Test-Path $VenvPython)) {
     Write-Host "[1/4] 创建 uv 虚拟环境..."
-    uv venv "C:\Users\nicho\envs\gpu-sklearn" --python 3.11
+    uv venv "$VenvRoot" --python 3.11
 } else {
-    Write-Host "[1/4] uv 虚拟环境已存在: C:\Users\nicho\envs\gpu-sklearn"
+    Write-Host "[1/4] uv 虚拟环境已存在: $VenvRoot"
 }
 
-# ── 2. 安装 rpyc ──────────────────────────────────
+# ── 2. 安装 rpyc ────────────────────────────────
 Write-Host "[2/4] 安装 rpyc..."
 uv pip install --python $VenvPython rpyc scikit-learn
 Write-Host "  ✅ rpyc + scikit-learn (CPU fallback) 安装完成"
@@ -50,6 +60,12 @@ Write-Host "  ✅ .pth 自动加载 hook 已配置"
 # ── 4. 注册 Task Scheduler 开机自启任务 ───────────
 Write-Host "[4/4] 注册 Task Scheduler 任务..."
 
+# 用当前 Windows 用户名与仓库路径填充 XML 模板（Task Scheduler 不展开 UserId 中的环境变量）
+(Get-Content $TaskXmlTpl -Raw -Encoding UTF8) `
+    -replace '__WIN_USER__', $env:USERNAME `
+    -replace '__BRIDGE_ROOT__', $BridgeRoot |
+    Set-Content -Path $TaskXml -Encoding Unicode
+
 # 先删除旧任务（如果存在）
 schtasks /Delete /TN $TaskName /F 2>$null | Out-Null
 
@@ -69,7 +85,7 @@ Write-Host "  ✅ Windows 端安装完成！"
 Write-Host "========================================"
 Write-Host ""
 Write-Host "下一步: 运行 WSL2 端安装脚本"
-Write-Host "  wsl -d Ubuntu -u nicho -- bash /mnt/c/Users/nicho/gpu-sklearn-bridge/wsl_server/setup.sh"
+Write-Host "  wsl -d $WslDistro -u $WslUser --cd '$BridgeRoot' -- bash ./wsl_server/setup.sh"
 Write-Host ""
 Write-Host "安装完成后立即启动服务（无需重启）:"
 Write-Host "  & '$BridgeRoot\scripts\start_bridge.ps1'"

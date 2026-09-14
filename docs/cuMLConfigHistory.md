@@ -1,7 +1,8 @@
 # cuML GPU sklearn 环境构建全流程记录
 
 > **记录日期**：2026-02-26  
-> **目标**：在 Windows 11 上通过 uv 新建 Python 环境，实现 GPU 版 scikit-learn（RAPIDS cuML），开机自启动，对 Windows 侧 Python 透明可用
+> **目标**：在 Windows 11 上通过 uv 新建 Python 环境，实现 GPU 版 scikit-learn（RAPIDS cuML），开机自启动，对 Windows 侧 Python 透明可用  
+> **路径说明**：本文中 `%USERPROFILE%` / `$HOME` / `<USER>` 代指当前用户目录与用户名；原始记录中为作者机器上的具体路径。
 
 ---
 
@@ -66,7 +67,7 @@ wsl --list --verbose
 ### 2.1 尝试 uv 安装 cuml-cu12
 
 ```powershell
-uv venv C:\Users\nicho\envs\gpu-sklearn --python 3.11
+uv venv %USERPROFILE%\envs\gpu-sklearn --python 3.11
 uv pip install cuml-cu12 --extra-index-url https://pypi.nvidia.com
 ```
 
@@ -78,7 +79,7 @@ cuml-cu12>=24.4.0 has no wheels with a matching platform tag (e.g., `win_amd64`)
 ### 2.2 尝试旧版本（Python 3.9）
 
 ```powershell
-uv venv C:\Users\nicho\envs\gpu-sklearn-py39 --python 3.9
+uv venv %USERPROFILE%\envs\gpu-sklearn-py39 --python 3.9
 uv pip install "cuml-cu12==24.2.0" --extra-index-url https://pypi.nvidia.com
 ```
 
@@ -142,7 +143,7 @@ RAPIDS cuML 26.02 → RTX 4060 GPU
 
 ### 4.1 镜像网络模式尝试（失败）
 
-创建 `C:\Users\nicho\.wslconfig`：
+创建 `%USERPROFILE%\.wslconfig`：
 ```ini
 [wsl2]
 networkingMode=mirrored
@@ -177,10 +178,10 @@ uv 安装脚本通过 Windows 代理下载后传入 WSL2 执行：
 ```powershell
 # Windows 侧用代理下载
 $env:https_proxy="http://127.0.0.1:7890"
-Invoke-WebRequest -Uri "https://astral.sh/uv/install.sh" -OutFile "C:\Users\nicho\uv_install.sh"
+Invoke-WebRequest -Uri "https://astral.sh/uv/install.sh" -OutFile "$env:USERPROFILE\uv_install.sh"
 
 # 在 WSL2 中执行（脚本已在本地，无需网络）
-wsl -d Ubuntu -- bash /mnt/c/Users/nicho/uv_install.sh
+wsl -d Ubuntu -- bash /mnt/c/Users/<USER>/uv_install.sh
 ```
 
 ---
@@ -190,7 +191,7 @@ wsl -d Ubuntu -- bash /mnt/c/Users/nicho/uv_install.sh
 ### 5.1 在 WSL2 中安装 uv
 
 ```bash
-# uv 0.10.6 安装到 /home/nicho/.local/bin/
+# uv 0.10.6 安装到 $HOME/.local/bin/
 ~/.local/bin/uv --version
 # uv 0.10.6
 ```
@@ -200,7 +201,7 @@ wsl -d Ubuntu -- bash /mnt/c/Users/nicho/uv_install.sh
 ```bash
 ~/.local/bin/uv venv ~/envs/gpu-sklearn --python 3.11
 # Using CPython 3.11.14
-# Creating virtual environment at: /home/nicho/envs/gpu-sklearn
+# Creating virtual environment at: /home/<USER>/envs/gpu-sklearn
 ```
 
 ### 5.3 安装 cuML（直连 NVIDIA PyPI）
@@ -246,7 +247,7 @@ wsl -d Ubuntu -- bash /mnt/c/Users/nicho/uv_install.sh
 
 ## 6. 构建 Flask 桥接服务端
 
-**文件：** `C:\Users\nicho\gpu-sklearn-bridge\server.py`（同步至 WSL2 `~/gpu-sklearn-bridge/server.py`）
+**文件：** `%USERPROFILE%\gpu-sklearn-bridge\server.py`（同步至 WSL2 `~/gpu-sklearn-bridge/server.py`）
 
 ### 6.1 支持的 cuML 类
 
@@ -304,16 +305,16 @@ SERVER="$HOME/gpu-sklearn-bridge/server.py"
 nohup "$PYTHON" "$SERVER" >> "$HOME/gpu-sklearn-bridge/server.log" 2>&1 &
 ```
 
-**`C:\Users\nicho\gpu-sklearn-bridge\start_bridge.bat`**（Windows 入口）：
+**`%USERPROFILE%\gpu-sklearn-bridge\start_bridge.bat`**（Windows 入口）：
 ```bat
-wsl -d Ubuntu -- bash /mnt/c/Users/nicho/gpu-sklearn-bridge/start_server.sh
+wsl -d Ubuntu -- bash /mnt/c/Users/<USER>/gpu-sklearn-bridge/start_server.sh
 ```
 
 ---
 
 ## 7. 构建 Windows 侧代理包 cuml_proxy
 
-**位置：** `C:\Users\nicho\gpu-sklearn-bridge\cuml_proxy\`
+**位置：** `%USERPROFILE%\gpu-sklearn-bridge\cuml_proxy\`
 
 ### 7.1 包结构
 
@@ -343,12 +344,12 @@ cuml_proxy/
 
 ```powershell
 # 创建 Python 3.11 虚拟环境
-uv venv C:\Users\nicho\envs\cuml-proxy --python 3.11
+uv venv "$env:USERPROFILE\envs\cuml-proxy" --python 3.11
 # Using CPython 3.11.13
-# Creating virtual environment at: C:\Users\nicho\envs\cuml-proxy
+# Creating virtual environment at: C:\Users\<USER>\envs\cuml-proxy
 
 # 安装依赖
-uv pip install --python C:\Users\nicho\envs\cuml-proxy\Scripts\python.exe requests numpy
+uv pip install --python "$env:USERPROFILE\envs\cuml-proxy\Scripts\python.exe" requests numpy
 # Installed: certifi, charset-normalizer, idna, numpy, requests, urllib3
 ```
 
@@ -358,13 +359,13 @@ uv pip install --python C:\Users\nicho\envs\cuml-proxy\Scripts\python.exe reques
 
 ```powershell
 Set-Content `
-  "C:\Users\nicho\envs\cuml-proxy\Lib\site-packages\cuml_proxy_bridge.pth" `
-  "C:\Users\nicho\gpu-sklearn-bridge"
+  "$env:USERPROFILE\envs\cuml-proxy\Lib\site-packages\cuml_proxy_bridge.pth" `
+  "$env:USERPROFILE\gpu-sklearn-bridge"
 ```
 
 **验证：**
 ```powershell
-C:\Users\nicho\envs\cuml-proxy\Scripts\python.exe -c "
+& "$env:USERPROFILE\envs\cuml-proxy\Scripts\python.exe" -c "
 from cuml_proxy.linear_model import LinearRegression
 print(repr(LinearRegression()))
 # LinearRegression() [GPU via WSL2]
@@ -388,14 +389,14 @@ Register-ScheduledTask ...
 Set-ItemProperty `
   -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" `
   -Name "GPU-sklearn-bridge" `
-  -Value "C:\Users\nicho\gpu-sklearn-bridge\start_bridge.bat"
+  -Value "$env:USERPROFILE\gpu-sklearn-bridge\start_bridge.bat"
 ```
 
 **验证：**
 ```powershell
 Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" |
   Select-Object "GPU-sklearn-bridge"
-# GPU-sklearn-bridge : C:\Users\nicho\gpu-sklearn-bridge\start_bridge.bat
+# GPU-sklearn-bridge : C:\Users\<USER>\gpu-sklearn-bridge\start_bridge.bat
 ```
 
 **启动时序：**
@@ -432,7 +433,7 @@ _session.proxies = {"http": None, "https": None}  # 显式清空
 ```powershell
 $env:HTTP_PROXY="http://127.0.0.1:7890"
 $env:HTTPS_PROXY="http://127.0.0.1:7890"
-C:\Users\nicho\envs\cuml-proxy\Scripts\python.exe -c "
+& "$env:USERPROFILE\envs\cuml-proxy\Scripts\python.exe" -c "
 from cuml_proxy.linear_model import LinearRegression
 import numpy as np
 lr = LinearRegression()
@@ -447,7 +448,7 @@ print('OK - 系统代理不干扰桥接请求')
 ## 11. 文件结构总览
 
 ```
-C:\Users\nicho\
+%USERPROFILE%\
 ├── .wslconfig                          # WSL2 配置（保留，networkingMode 默认）
 ├── gpu-sklearn-bridge\
 │   ├── server.py                       # WSL2 Flask 桥接服务（同步到 WSL2 home）
@@ -502,7 +503,7 @@ Invoke-RestMethod "http://127.0.0.1:19876/health"
 ### 12.2 端到端功能测试
 
 ```powershell
-C:\Users\nicho\envs\cuml-proxy\Scripts\python.exe -c "
+& "$env:USERPROFILE\envs\cuml-proxy\Scripts\python.exe" -c "
 import numpy as np
 from cuml_proxy.cluster import KMeans
 from cuml_proxy.decomposition import PCA
@@ -544,10 +545,10 @@ print('All GPU ops OK!')
 
 ```powershell
 # 方法1：直接运行批处理
-C:\Users\nicho\gpu-sklearn-bridge\start_bridge.bat
+& "$env:USERPROFILE\gpu-sklearn-bridge\start_bridge.bat"
 
 # 方法2：PowerShell
-wsl -d Ubuntu -- bash /mnt/c/Users/nicho/gpu-sklearn-bridge/start_server.sh
+wsl -d Ubuntu -- bash /mnt/c/Users/<USER>/gpu-sklearn-bridge/start_server.sh
 ```
 
 ### 查看服务日志
@@ -574,7 +575,7 @@ tail -f ~/gpu-sklearn-bridge/server.log
 | WSL2（读） | `np.load(shm/{uuid}.npy)` → 读后 `os.unlink` |
 
 **阈值**：10 KB，超过则走共享文件，否则 inline base64。  
-共享目录 `C:\Users\nicho\gpu-sklearn-bridge\shm\` 在 WSL2 中映射为 `/mnt/c/Users/nicho/gpu-sklearn-bridge/shm/`，两端访问同一物理路径。
+共享目录 `%USERPROFILE%\gpu-sklearn-bridge\shm\` 在 WSL2 中映射为 `/mnt/c/Users/<USER>/gpu-sklearn-bridge/shm/`，两端访问同一物理路径。
 
 ### 14.3 缺点（促成 mmap 升级）
 
@@ -588,7 +589,7 @@ tail -f ~/gpu-sklearn-bridge/server.log
 
 ### 15.1 方案设计
 
-**文件：** `C:\Users\nicho\gpu-sklearn-bridge\shm_transport.py`（同步至 WSL2）
+**文件：** `%USERPROFILE%\gpu-sklearn-bridge\shm_transport.py`（同步至 WSL2）
 
 预先分配一个 512 MB 的二进制文件 `shm/pool.bin`，分为两个固定 slot：
 
@@ -657,7 +658,7 @@ class ShmTransport:
 ```python
 # 保存（将模型 pickle 到 models/{name}.pkl）
 model.save("my_model")
-# [cuml_proxy] 模型已保存 → C:\Users\nicho\gpu-sklearn-bridge\models\my_model.pkl
+# [cuml_proxy] 模型已保存 → C:\Users\<USER>\gpu-sklearn-bridge\models\my_model.pkl
 
 # 加载（无需重新训练，直接推理）
 from cuml_proxy.proxy import ProxyEstimator
@@ -682,7 +683,7 @@ ProxyEstimator.load("name")
   → Windows: 返回带该 model_id 的 ProxyEstimator 实例
 ```
 
-模型文件位于 `C:\Users\nicho\gpu-sklearn-bridge\models\`，WSL2 通过 `/mnt/c/...` 写入，Windows 可直接查看 `.pkl` 文件。
+模型文件位于 `%USERPROFILE%\gpu-sklearn-bridge\models\`，WSL2 通过 `/mnt/c/...` 写入，Windows 可直接查看 `.pkl` 文件。
 
 ### 16.3 验证结果（2026-02-26）
 

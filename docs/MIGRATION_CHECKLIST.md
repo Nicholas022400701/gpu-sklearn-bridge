@@ -55,7 +55,7 @@
 
 ```bash
 # 备份旧池（可选）
-move C:\Users\nicho\gpu-sklearn-bridge\shm\pool.bin C:\Users\nicho\gpu-sklearn-bridge\shm\pool.bin.backup
+move %USERPROFILE%\gpu-sklearn-bridge\shm\pool.bin %USERPROFILE%\gpu-sklearn-bridge\shm\pool.bin.backup
 
 # 系统会在首次运行时自动创建新 4 GB pool
 ```
@@ -64,15 +64,15 @@ move C:\Users\nicho\gpu-sklearn-bridge\shm\pool.bin C:\Users\nicho\gpu-sklearn-b
 
 **WSL2 服务端**：
 ```bash
-cd /mnt/c/Users/nicho/gpu-sklearn-bridge
+cd /mnt/c/Users/<USER>/gpu-sklearn-bridge
 python server.py
 # 观察启动日志：
-# [ShmTransport] 初始化 mmap pool: /mnt/c/Users/nicho/gpu-sklearn-bridge/shm/pool.bin (4.0 GB)
+# [ShmTransport] 初始化 mmap pool: /mnt/c/Users/<USER>/gpu-sklearn-bridge/shm/pool.bin (4.0 GB)
 ```
 
 **Windows 客户端** - 等待服务端就绪后运行：
 ```bash
-cd C:\Users\nicho\gpu-sklearn-bridge
+cd %USERPROFILE%\gpu-sklearn-bridge
 python test_extended_mmap.py
 ```
 
@@ -129,7 +129,7 @@ python test_extended_mmap.py
 ### 如果看到 .npy 文件创建
 
 ```bash
-ls -la C:\Users\nicho\gpu-sklearn-bridge\shm\
+ls -la %USERPROFILE%\gpu-sklearn-bridge\shm\
 # 如果有 UUID*.npy 文件，说明仍在使用 fallback
 ```
 

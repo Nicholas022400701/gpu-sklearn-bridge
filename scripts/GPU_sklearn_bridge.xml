@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="UTF-16"?>
 <!--
-  Task Scheduler XML 定义
+  Task Scheduler XML 定义（模板）
   任务名称: GPU_sklearn_bridge
-  触发时机: 用户 nicho 登录时
+  触发时机: 用户 __WIN_USER__ 登录时
   操作: 运行 start_bridge.ps1 启动 WSL2 cuML 服务
+  占位符 __WIN_USER__ / __BRIDGE_ROOT__ 由 scripts/install_windows.ps1 在注册前替换为
+  当前 Windows 用户名与仓库根目录（Task Scheduler 不会展开 UserId 中的环境变量）。
 -->
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Date>2026-02-26T00:00:00</Date>
-    <Author>nicho</Author>
+    <Author>__WIN_USER__</Author>
     <Description>登录时自动启动 WSL2 中的 GPU sklearn bridge (cuML rpyc 服务)</Description>
     <URI>\GPU_sklearn_bridge</URI>
   </RegistrationInfo>
@@ -16,7 +18,7 @@
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
-      <UserId>nicho</UserId>
+      <UserId>__WIN_USER__</UserId>
       <!-- 登录后延迟 15 秒，等待网络和 WSL2 初始化 -->
       <Delay>PT15S</Delay>
     </LogonTrigger>
@@ -24,7 +26,7 @@
 
   <Principals>
     <Principal id="Author">
-      <UserId>nicho</UserId>
+      <UserId>__WIN_USER__</UserId>
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
@@ -52,8 +54,8 @@
   <Actions Context="Author">
     <Exec>
       <Command>powershell.exe</Command>
-      <Arguments>-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Users\nicho\gpu-sklearn-bridge\scripts\start_bridge.ps1"</Arguments>
-      <WorkingDirectory>C:\Users\nicho\gpu-sklearn-bridge</WorkingDirectory>
+      <Arguments>-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "__BRIDGE_ROOT__\scripts\start_bridge.ps1"</Arguments>
+      <WorkingDirectory>__BRIDGE_ROOT__</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>
